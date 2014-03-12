@@ -3,6 +3,9 @@
 
 #include "stdafx.h"
 
+#define REG_KEY_CONFIG TEXT("Software\\Zhuowei Zhang\\TouchscreenGuard")
+#define MAX_VALUE_NAME 16383
+
 static HWINEVENTHOOK shellHook;
 
 static std::vector<std::wstring> disableApps;
@@ -75,10 +78,35 @@ void CALLBACK ShellHookProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG ido
 	setTouchscreenMode(!isInDisable, false);
 }
 
+void addAllValues(PTSTR pszz)
+{
+	while (*pszz)
+	{
+		disableApps.push_back(std::wstring(pszz));
+		pszz = pszz + _tcslen(pszz) + 1;
+	}
+}
+
+void readDisableAppsList() {
+	HKEY disableListKey;
+	TCHAR valueBuffer[MAX_VALUE_NAME];
+	LONG success = RegOpenKeyEx(HKEY_CURRENT_USER, REG_KEY_CONFIG, 0, KEY_READ, &disableListKey);
+	if (success != ERROR_SUCCESS) {
+		abort();
+	}
+	DWORD myLen = MAX_VALUE_NAME;
+	success = RegGetValue(disableListKey, NULL, L"DisableList", RRF_RT_REG_MULTI_SZ, NULL, valueBuffer, &myLen);
+	if (success != ERROR_SUCCESS) {
+		abort();
+	}
+	addAllValues(valueBuffer);
+	RegCloseKey(disableListKey);
+}
+
 
 int WINAPI WinMain(HINSTANCE hinstance, HINSTANCE hinstprev, LPSTR cmdline, int cmdShow) {
 	MSG msg;
-	disableApps.push_back(std::wstring(L"C:\\Windows\\System32\\notepad.exe"));
+	readDisableAppsList();
 	std::sort(disableApps.begin(), disableApps.end());
 	/* Grab the touchscreen: TODO automagically do this */
 	deviceInfoSet = SetupDiGetClassDevs(NULL, L"HID\\VID_1B96&PID_0F03&COL03\\6&12988C71&0&0002", NULL, DIGCF_DEVICEINTERFACE | DIGCF_ALLCLASSES);

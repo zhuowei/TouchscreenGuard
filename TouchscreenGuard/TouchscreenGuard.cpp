@@ -5,6 +5,47 @@
 
 static HWINEVENTHOOK shellHook;
 
+static std::vector<std::wstring> disableApps;
+
+static bool touchScreenStatus = true;
+
+static HDEVINFO deviceInfoSet;
+static DEVINST touchscreenDevInst;
+
+static void setTouchscreenMode(bool enable, bool force) {
+	if (touchScreenStatus == enable && !force) return;
+	/* use SetupApi to enable the touchscreen device */
+	SP_PROPCHANGE_PARAMS myParams;
+	myParams.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+	myParams.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+	myParams.StateChange = enable ? DICS_ENABLE : DICS_DISABLE;
+	myParams.Scope = DICS_FLAG_GLOBAL;
+	myParams.HwProfile = 0;
+	SP_DEVINFO_DATA devdata;
+	devdata.cbSize = sizeof(devdata);
+	BOOL success = SetupDiEnumDeviceInfo(deviceInfoSet, 0, &devdata);
+	if (!success) {
+		abort();
+	}
+	success = SetupDiSetClassInstallParams(deviceInfoSet, &devdata, &myParams.ClassInstallHeader, sizeof(myParams));
+	if (!success) {
+		DWORD lasterror = GetLastError();
+		abort();
+	}
+	success = SetupDiChangeState(deviceInfoSet, &devdata);
+	if (!success) {
+		DWORD lasterror = GetLastError();
+		abort();
+	}
+	if (enable) {
+		OutputDebugString(L"enabling!\n");
+	}
+	else {
+		OutputDebugString(L"disabling!\n");
+	}
+	touchScreenStatus = enable;
+}
+
 void CALLBACK ShellHookProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idobject, LONG idchild, DWORD dwEventThread, DWORD dwEventTime) {
 	OutputDebugString(L"Window: ");
 	if (hwnd == NULL) {
@@ -27,16 +68,29 @@ void CALLBACK ShellHookProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG ido
 	QueryFullProcessImageName(processHandle, 0, programNameBuffer, &nameLength);
 	OutputDebugString(programNameBuffer);
 	OutputDebugString(L"\n");
+	bool isInDisable = std::binary_search(disableApps.begin(), disableApps.end(), std::wstring(programNameBuffer));
+	if (isInDisable) {
+		OutputDebugString(L"Should disable here!\n");
+	}
+	setTouchscreenMode(!isInDisable, false);
 }
 
 
 int WINAPI WinMain(HINSTANCE hinstance, HINSTANCE hinstprev, LPSTR cmdline, int cmdShow) {
 	MSG msg;
+	disableApps.push_back(std::wstring(L"C:\\Windows\\System32\\notepad.exe"));
+	std::sort(disableApps.begin(), disableApps.end());
+	/* Grab the touchscreen: TODO automagically do this */
+	deviceInfoSet = SetupDiGetClassDevs(NULL, L"HID\\VID_1B96&PID_0F03&COL03\\6&12988C71&0&0002", NULL, DIGCF_DEVICEINTERFACE | DIGCF_ALLCLASSES);
+	if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+		DWORD lasterror = GetLastError();
+		abort();
+	}
 	shellHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, ShellHookProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 	if (shellHook == NULL) {
 		MessageBox(NULL, L"Failed to initialize hook", L"TouchscreenGuard", MB_ICONERROR);
 	}
-	//HWND window = CreateWindowEx(0, TEXT("Scratch"), TEXT("Scratch"), 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hinstance, 0);
+	setTouchscreenMode(true, true);
 	while (GetMessage(&msg, NULL, 0, 0)) {
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
